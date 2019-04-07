@@ -104,8 +104,8 @@ static inline void ParseAndCheckCombinedNMSBoxSizes(OpKernelContext* context,
 }
 // Return intersection-over-union overlap between boxes i and j
 template <typename T>
-static inline bool IOUGreaterThanThreshold(
-    typename TTypes<T, 2>::ConstTensor boxes, int i, int j, T iou_threshold) {
+static inline T IOUBetweenBoxes(
+    typename TTypes<T, 2>::ConstTensor boxes, int i, int j) {
   const T ymin_i = std::min<T>(boxes(i, 0), boxes(i, 2));
   const T xmin_i = std::min<T>(boxes(i, 1), boxes(i, 3));
   const T ymax_i = std::max<T>(boxes(i, 0), boxes(i, 2));
@@ -125,9 +125,14 @@ static inline bool IOUGreaterThanThreshold(
       std::max<T>(intersection_ymax - intersection_ymin, static_cast<T>(0.0)) *
       std::max<T>(intersection_xmax - intersection_xmin, static_cast<T>(0.0));
   const T iou = intersection_area / (area_i + area_j - intersection_area);
-  return iou > iou_threshold;
+  return iou;
 }
-
+// Return intersection-over-union overlap between boxes i and j
+template <typename T>
+static inline bool IOUGreaterThanThreshold(
+    typename TTypes<T, 2>::ConstTensor boxes, int i, int j, T iou_threshold) {
+  return IOUBetweenBoxes<T>(boxes, i, j) > iou_threshold;
+}
 static inline bool OverlapsGreaterThanThreshold(
     typename TTypes<float, 2>::ConstTensor overlaps, int i, int j,
     float overlap_threshold) {
