@@ -1328,4 +1328,71 @@ TEST_F(CombinedNonMaxSuppressionOpTest,
   test::ExpectTensorEqual<int>(expected_valid_d, *GetOutput(3));
 }
 
+//
+// NonMaxSuppressionWithOverlapsOp Tests
+//
+
+class NonMaxSuppressionSoftOpTest : public OpsTestBase {
+ protected:
+  void MakeOp() {
+    TF_EXPECT_OK(NodeDefBuilder("non_max_suppression_op",
+                                "NonMaxSuppressionSoftOp")
+                     .Input(FakeInput(DT_FLOAT))
+                     .Input(FakeInput(DT_FLOAT))
+                     .Input(FakeInput(DT_INT32))
+                     .Input(FakeInput(DT_FLOAT))
+                     .Input(FakeInput(DT_FLOAT))
+                     .Finalize(node_def()));
+    TF_EXPECT_OK(InitOp());
+  }
+
+};
+
+TEST_F(NonMaxSuppressionSoftOpTest,
+       TestSelectFromTwoBatchesTwoClassesForBoxesAndScores) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({2, 6, 2, 4}),
+      // batch 0, box1 of class 1 should get selected
+      {0, 0, 0.1, 0.1, 0, 0, 0.1, 0.1, 0, 0.01f, 0.1, 0.11f, 0, 0.6f, 0.1, 0.7f,
+       0, -0.01, 0.1, 0.09f, 0, -0.01, 0.1, 0.09f, 0, 0.11, 0.1, 0.2, 0, 0.11,
+       0.1, 0.2, 0, 0.12f, 0.1, 0.21f, 0, 0.12f, 0.1, 0.21f, 0, 0.3, 1, 0.4, 0,
+       0.3, 1, 0.4,
+       // batch 1, box1 of class 0 should get selected
+       0, 0, 0.2, 0.2, 0, 0, 0.2, 0.2, 0, 0.02f, 0.2, 0.22f, 0, 0.02f, 0.2,
+       0.22f, 0, -0.02, 0.2, 0.19f, 0, -0.02, 0.2, 0.19f, 0, 0.21, 0.2, 0.3, 0,
+       0.21, 0.2, 0.3, 0, 0.22f, 0.2, 0.31f, 0, 0.22f, 0.2, 0.31f, 0, 0.4, 1,
+       0.5, 0, 0.4, 1, 0.5});
+
+  AddInputFromArray<float>(TensorShape({2, 6, 2}),
+                           {0.1f, 0.9f, 0.75f, 0.8f, 0.6f, 0.3f, 0.95f, 0.1f,
+                            0.5f, 0.5f, 0.3f,  0.1f, 0.1f, 0.9f, 0.75f, 0.8f,
+                            0.6f, 0.3f, 0.95f, 0.1f, 0.5f, 0.5f, 0.3f,  0.1f});
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  // boxes
+  Tensor expected_boxes(allocator(), DT_FLOAT, TensorShape({2, 3, 4}));
+  test::FillValues<float>(
+      &expected_boxes,
+      {0, 0.11, 0.1, 0.2, 0, 0, 0.1, 0.1, 0, 0.6f,  0.1, 0.7f,
+       0, 0.21, 0.2, 0.3, 0, 0, 0.2, 0.2, 0, 0.02f, 0.2, 0.22f});
+  test::ExpectTensorEqual<float>(expected_boxes, *GetOutput(0));
+  // scores
+  Tensor expected_scores(allocator(), DT_FLOAT, TensorShape({2, 3}));
+  test::FillValues<float>(&expected_scores, {0.95, 0.9, 0.8, 0.95, 0.9, 0.75});
+  test::ExpectTensorEqual<float>(expected_scores, *GetOutput(1));
+  // classes
+  Tensor expected_classes(allocator(), DT_FLOAT, TensorShape({2, 3}));
+  test::FillValues<float>(&expected_classes, {0, 1, 1, 0, 1, 0});
+  test::ExpectTensorEqual<float>(expected_classes, *GetOutput(2));
+  // valid
+  Tensor expected_valid_d(allocator(), DT_INT32, TensorShape({2}));
+  test::FillValues<int>(&expected_valid_d, {3, 3});
+  test::ExpectTensorEqual<int>(expected_valid_d, *GetOutput(3));
+}
+
 }  // namespace tensorflow
