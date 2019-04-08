@@ -1329,70 +1329,218 @@ TEST_F(CombinedNonMaxSuppressionOpTest,
 }
 
 //
-// NonMaxSuppressionWithOverlapsOp Tests
+// NonMaxSuppressionSoftOpTest
 //
 
 class NonMaxSuppressionSoftOpTest : public OpsTestBase {
  protected:
   void MakeOp() {
-    TF_EXPECT_OK(NodeDefBuilder("non_max_suppression_op",
-                                "NonMaxSuppressionSoftOp")
+    TF_EXPECT_OK(NodeDefBuilder("non_max_suppression_op", "NonMaxSuppressionSoft")
                      .Input(FakeInput(DT_FLOAT))
                      .Input(FakeInput(DT_FLOAT))
                      .Input(FakeInput(DT_INT32))
                      .Input(FakeInput(DT_FLOAT))
                      .Input(FakeInput(DT_FLOAT))
+                     .Input(FakeInput(DT_FLOAT))
                      .Finalize(node_def()));
     TF_EXPECT_OK(InitOp());
   }
-
 };
 
-TEST_F(NonMaxSuppressionSoftOpTest,
-       TestSelectFromTwoBatchesTwoClassesForBoxesAndScores) {
+TEST_F(NonMaxSuppressionSoftOpTest, TestSelectFromThreeClusters) {
   MakeOp();
   AddInputFromArray<float>(
-      TensorShape({2, 6, 2, 4}),
-      // batch 0, box1 of class 1 should get selected
-      {0, 0, 0.1, 0.1, 0, 0, 0.1, 0.1, 0, 0.01f, 0.1, 0.11f, 0, 0.6f, 0.1, 0.7f,
-       0, -0.01, 0.1, 0.09f, 0, -0.01, 0.1, 0.09f, 0, 0.11, 0.1, 0.2, 0, 0.11,
-       0.1, 0.2, 0, 0.12f, 0.1, 0.21f, 0, 0.12f, 0.1, 0.21f, 0, 0.3, 1, 0.4, 0,
-       0.3, 1, 0.4,
-       // batch 1, box1 of class 0 should get selected
-       0, 0, 0.2, 0.2, 0, 0, 0.2, 0.2, 0, 0.02f, 0.2, 0.22f, 0, 0.02f, 0.2,
-       0.22f, 0, -0.02, 0.2, 0.19f, 0, -0.02, 0.2, 0.19f, 0, 0.21, 0.2, 0.3, 0,
-       0.21, 0.2, 0.3, 0, 0.22f, 0.2, 0.31f, 0, 0.22f, 0.2, 0.31f, 0, 0.4, 1,
-       0.5, 0, 0.4, 1, 0.5});
-
-  AddInputFromArray<float>(TensorShape({2, 6, 2}),
-                           {0.1f, 0.9f, 0.75f, 0.8f, 0.6f, 0.3f, 0.95f, 0.1f,
-                            0.5f, 0.5f, 0.3f,  0.1f, 0.1f, 0.9f, 0.75f, 0.8f,
-                            0.6f, 0.3f, 0.95f, 0.1f, 0.5f, 0.5f, 0.3f,  0.1f});
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({6}), {.9f, .75f, .6f, .95f, .5f, .3f});
   AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({3}));
+  test::FillValues<int>(&expected, {3, 0, 5});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest,
+       TestSelectFromThreeClustersWithScoreThreshold) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({6}), {.9f, .75f, .6f, .95f, .5f, .3f});
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {0.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.4f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({2}));
+  test::FillValues<int>(&expected, {3, 0});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest,
+       TestSelectFromThreeClustersWithScoreThresholdZeroScores) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({6}), {.1, 0, 0, .3, .2, -5.0});
+  // If we ask for more boxes than we actually expect to get back;
+  // should still only get 2 boxes back.
+  AddInputFromArray<int>(TensorShape({}), {6});
+  AddInputFromArray<float>(TensorShape({}), {0.5f});
+  AddInputFromArray<float>(TensorShape({}), {-3.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({2}));
+  test::FillValues<int>(&expected, {3, 0});
+
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest,
+       TestSelectFromThreeClustersFlippedCoordinates) {
+  MakeOp();
+  AddInputFromArray<float>(TensorShape({6, 4}),
+                           {1, 1,  0, 0,  0, 0.1f,  1, 1.1f,  0, .9f, 1, -0.1f,
+                            0, 10, 1, 11, 1, 10.1f, 0, 11.1f, 1, 101, 0, 100});
+  AddInputFromArray<float>(TensorShape({6}), {.9f, .75f, .6f, .95f, .5f, .3f});
   AddInputFromArray<int>(TensorShape({}), {3});
   AddInputFromArray<float>(TensorShape({}), {.5f});
   AddInputFromArray<float>(TensorShape({}), {0.0f});
   TF_ASSERT_OK(RunOpKernel());
 
-  // boxes
-  Tensor expected_boxes(allocator(), DT_FLOAT, TensorShape({2, 3, 4}));
-  test::FillValues<float>(
-      &expected_boxes,
-      {0, 0.11, 0.1, 0.2, 0, 0, 0.1, 0.1, 0, 0.6f,  0.1, 0.7f,
-       0, 0.21, 0.2, 0.3, 0, 0, 0.2, 0.2, 0, 0.02f, 0.2, 0.22f});
-  test::ExpectTensorEqual<float>(expected_boxes, *GetOutput(0));
-  // scores
-  Tensor expected_scores(allocator(), DT_FLOAT, TensorShape({2, 3}));
-  test::FillValues<float>(&expected_scores, {0.95, 0.9, 0.8, 0.95, 0.9, 0.75});
-  test::ExpectTensorEqual<float>(expected_scores, *GetOutput(1));
-  // classes
-  Tensor expected_classes(allocator(), DT_FLOAT, TensorShape({2, 3}));
-  test::FillValues<float>(&expected_classes, {0, 1, 1, 0, 1, 0});
-  test::ExpectTensorEqual<float>(expected_classes, *GetOutput(2));
-  // valid
-  Tensor expected_valid_d(allocator(), DT_INT32, TensorShape({2}));
-  test::FillValues<int>(&expected_valid_d, {3, 3});
-  test::ExpectTensorEqual<int>(expected_valid_d, *GetOutput(3));
+  Tensor expected(allocator(), DT_INT32, TensorShape({3}));
+  test::FillValues<int>(&expected, {3, 0, 5});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
 }
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestSelectAtMostTwoBoxesFromThreeClusters) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({6}), {.9f, .75f, .6f, .95f, .5f, .3f});
+  AddInputFromArray<int>(TensorShape({}), {2});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({2}));
+  test::FillValues<int>(&expected, {3, 0});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest,
+       TestSelectAtMostThirtyBoxesFromThreeClusters) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({6}), {.9f, .75f, .6f, .95f, .5f, .3f});
+  AddInputFromArray<int>(TensorShape({}), {30});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({3}));
+  test::FillValues<int>(&expected, {3, 0, 5});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestSelectSingleBox) {
+  MakeOp();
+  AddInputFromArray<float>(TensorShape({1, 4}), {0, 0, 1, 1});
+  AddInputFromArray<float>(TensorShape({1}), {.9f});
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({1}));
+  test::FillValues<int>(&expected, {0});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestSelectFromTenIdenticalBoxes) {
+  MakeOp();
+
+  int num_boxes = 10;
+  std::vector<float> corners(num_boxes * 4);
+  std::vector<float> scores(num_boxes);
+  for (int i = 0; i < num_boxes; ++i) {
+    corners[i * 4 + 0] = 0;
+    corners[i * 4 + 1] = 0;
+    corners[i * 4 + 2] = 1;
+    corners[i * 4 + 3] = 1;
+    scores[i] = .9;
+  }
+  AddInputFromArray<float>(TensorShape({num_boxes, 4}), corners);
+  AddInputFromArray<float>(TensorShape({num_boxes}), scores);
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({1}));
+  test::FillValues<int>(&expected, {0});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestInconsistentBoxAndScoreShapes) {
+  MakeOp();
+  AddInputFromArray<float>(
+      TensorShape({6, 4}),
+      {0, 0,  1, 1,  0, 0.1f,  1, 1.1f,  0, -0.1f, 1, 0.9f,
+       0, 10, 1, 11, 0, 10.1f, 1, 11.1f, 0, 100,   1, 101});
+  AddInputFromArray<float>(TensorShape({5}), {.9f, .75f, .6f, .95f, .5f});
+  AddInputFromArray<int>(TensorShape({}), {30});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  Status s = RunOpKernel();
+
+  ASSERT_FALSE(s.ok());
+  EXPECT_TRUE(
+      str_util::StrContains(s.ToString(), "scores has incompatible shape"))
+      << s;
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestInvalidIOUThreshold) {
+  MakeOp();
+  AddInputFromArray<float>(TensorShape({1, 4}), {0, 0, 1, 1});
+  AddInputFromArray<float>(TensorShape({1}), {.9f});
+  AddInputFromArray<int>(TensorShape({}), {3});
+  AddInputFromArray<float>(TensorShape({}), {1.2f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  Status s = RunOpKernel();
+
+  ASSERT_FALSE(s.ok());
+  EXPECT_TRUE(
+      str_util::StrContains(s.ToString(), "iou_threshold must be in [0, 1]"))
+      << s;
+}
+
+TEST_F(NonMaxSuppressionSoftOpTest, TestEmptyInput) {
+  MakeOp();
+  AddInputFromArray<float>(TensorShape({0, 4}), {});
+  AddInputFromArray<float>(TensorShape({0}), {});
+  AddInputFromArray<int>(TensorShape({}), {30});
+  AddInputFromArray<float>(TensorShape({}), {.5f});
+  AddInputFromArray<float>(TensorShape({}), {0.0f});
+  TF_ASSERT_OK(RunOpKernel());
+
+  Tensor expected(allocator(), DT_INT32, TensorShape({0}));
+  test::FillValues<int>(&expected, {});
+  test::ExpectTensorEqual<int>(expected, *GetOutput(0));
+}
+
 
 }  // namespace tensorflow
